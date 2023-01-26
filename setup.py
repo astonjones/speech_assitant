@@ -12,9 +12,9 @@ shutil.copy(
     os.path.join(os.path.dirname(__file__), 'speech_assistant_mic.py'),
     os.path.join(package_folder, 'speech_assistant_mic.py'))
 
-# with open(os.path.join(os.path.dirname(__file__), 'MANIFEST.in'), 'w') as f:
+with open(os.path.join(os.path.dirname(__file__), 'MANIFEST.in'), 'w') as f:
 #     f.write('include speech_assistant/speech_assistant_file.py\n')
-#     f.write('include speech_assistant/speech_assistant_mic.py\n')
+    f.write('include speech_assistant/speech_assistant_mic.py\n')
 
 with open(os.path.join(os.path.dirname(__file__), 'README.md'), 'r') as f:
     long_description = f.read()

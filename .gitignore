@@ -3,3 +3,4 @@ dist
 MANIFEST.in
 speechAssistant
 speechAssistant.egg-info
+/speech_assistant

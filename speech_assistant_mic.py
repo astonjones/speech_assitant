@@ -1,17 +1,20 @@
+
 import argparse
+import os
 import struct
 import wave
+from datetime import datetime
 from threading import Thread
 
-import pvrhino
+import pvporcupine
 from pvrecorder import PvRecorder
 
 
-class RhinoDemo(Thread):
+class PorcupineDemo(Thread):
     """
-    Microphone Demo for Rhino Speech-to-Intent engine. It creates an input audio stream from a microphone, monitors
-    it, and extracts the intent from the speech command. It optionally saves the recorded audio into a file for further
-    debugging.
+    Microphone Demo for Porcupine wake word engine. It creates an input audio stream from a microphone, monitors it, and
+    upon detecting the specified wake word(s) prints the detection time and wake word on console. It optionally saves
+    the recorded audio into a file for further debugging.
     """
 
     def __init__(
@@ -19,76 +22,73 @@ class RhinoDemo(Thread):
             access_key,
             library_path,
             model_path,
-            context_path,
-            endpoint_duration_sec,
-            require_endpoint,
-            audio_device_index=None,
+            keyword_paths,
+            sensitivities,
+            input_device_index=None,
             output_path=None):
+
         """
         Constructor.
-        :param access_key: AccessKey obtained from Picovoice Console (https://console.picovoice.ai/).
-        :param library_path: Absolute path to Rhino's dynamic library.
-        :param model_path: Absolute path to file containing model parameters.
-        :param context_path: Absolute path to file containing context model (file with `.rhn` extension). A context
-        represents the set of expressions (spoken commands), intents, and intent arguments (slots) within a domain of
-        interest.
-        :param endpoint_duration_sec: Endpoint duration in seconds. An endpoint is a chunk of silence at the end of an
-        utterance that marks the end of spoken command. It should be a positive number within [0.5, 5]. A lower endpoint
-        duration reduces delay and improves responsiveness. A higher endpoint duration assures Rhino doesn't return
-        inference preemptively in case the user pauses before finishing the request.
-        require_endpoint: If set to `True`, Rhino requires an endpoint (a chunk of silence) after the spoken command.
-        If set to `False`, Rhino tries to detect silence, but if it cannot, it still will provide inference regardless.
-        Set to `False` only if operating in an environment with overlapping speech (e.g. people talking in the
-        background).
-        :param audio_device_index: Optional argument. If provided, audio is recorded from this input device. Otherwise,
+        :param library_path: Absolute path to Porcupine's dynamic library.
+        :param model_path: Absolute path to the file containing model parameters.
+        :param keyword_paths: Absolute paths to keyword model files.
+        :param sensitivities: Sensitivities for detecting keywords. Each value should be a number within [0, 1]. A
+        higher sensitivity results in fewer misses at the cost of increasing the false alarm rate. If not set 0.5 will
+        be used.
+        :param input_device_index: Optional argument. If provided, audio is recorded from this input device. Otherwise,
         the default audio input device is used.
         :param output_path: If provided recorded audio will be stored in this location at the end of the run.
         """
 
-        super(RhinoDemo, self).__init__()
+        super(PorcupineDemo, self).__init__()
 
         self._access_key = access_key
         self._library_path = library_path
         self._model_path = model_path
-        self._context_path = context_path
-        self._endpoint_duration_sec = endpoint_duration_sec
-        self._require_endpoint = require_endpoint
-        self._audio_device_index = audio_device_index
+        self._keyword_paths = keyword_paths
+        self._sensitivities = sensitivities
+        self._input_device_index = input_device_index
 
         self._output_path = output_path
 
     def run(self):
         """
-         Creates an input audio stream, instantiates an instance of Rhino object, and infers the intent from spoken
-         commands.
+         Creates an input audio stream, instantiates an instance of Porcupine object, and monitors the audio stream for
+         occurrences of the wake word(s). It prints the time of detection for each occurrence and the wake word.
          """
 
-        rhino = None
+        keywords = list()
+        for x in self._keyword_paths:
+            keyword_phrase_part = os.path.basename(x).replace('.ppn', '').split('_')
+            if len(keyword_phrase_part) > 6:
+                keywords.append(' '.join(keyword_phrase_part[0:-6]))
+            else:
+                keywords.append(keyword_phrase_part[0])
+
+        porcupine = None
         recorder = None
         wav_file = None
-
         try:
-            rhino = pvrhino.create(
+            porcupine = pvporcupine.create(
                 access_key=self._access_key,
                 library_path=self._library_path,
                 model_path=self._model_path,
-                context_path=self._context_path,
-                endpoint_duration_sec=self._endpoint_duration_sec,
-                require_endpoint=self._require_endpoint)
+                keyword_paths=self._keyword_paths,
+                sensitivities=self._sensitivities)
 
-            recorder = PvRecorder(device_index=self._audio_device_index, frame_length=rhino.frame_length)
+            recorder = PvRecorder(device_index=self._input_device_index, frame_length=porcupine.frame_length)
             recorder.start()
 
             if self._output_path is not None:
                 wav_file = wave.open(self._output_path, "w")
                 wav_file.setparams((1, 2, 16000, 512, "NONE", "NONE"))
 
-            print(rhino.context_info)
-            print()
+            print('Using device: %s', recorder.selected_device)
 
-            print("Using device: %s" % recorder.selected_device)
-            print("Listening...")
-            print()
+            print('Listening {')
+            for keyword, sensitivity in zip(keywords, self._sensitivities):
+                print('  %s (%.2f)' % (keyword, sensitivity))
+            print('}')
 
             while True:
                 pcm = recorder.read()
@@ -96,54 +96,43 @@ class RhinoDemo(Thread):
                 if wav_file is not None:
                     wav_file.writeframes(struct.pack("h" * len(pcm), *pcm))
 
-                is_finalized = rhino.process(pcm)
-                if is_finalized:
-                    inference = rhino.get_inference()
-                    if inference.is_understood:
-                        print('{')
-                        print("  intent : '%s'" % inference.intent)
-                        print('  slots : {')
-                        for slot, value in inference.slots.items():
-                            print("    %s : '%s'" % (slot, value))
-                        print('  }')
-                        print('}\n')
-                    else:
-                        print("Didn't understand the command.\n")
-        except pvrhino.RhinoInvalidArgumentError as e:
+                result = porcupine.process(pcm)
+                if result >= 0:
+                    print('[%s] Detected %s' % (str(datetime.now()), keywords[result]))
+        except pvporcupine.PorcupineInvalidArgumentError as e:
             args = (
                 self._access_key,
                 self._library_path,
                 self._model_path,
-                self._context_path,
-                self._require_endpoint
+                self._keyword_paths,
+                self._sensitivities,
             )
-            print("One or more arguments provided to Rhino is invalid: ", args)
+            print("One or more arguments provided to Porcupine is invalid: ", args)
             print("If all other arguments seem valid, ensure that '%s' is a valid AccessKey" % self._access_key)
             raise e
-        except pvrhino.RhinoActivationError as e:
+        except pvporcupine.PorcupineActivationError as e:
             print("AccessKey activation error")
             raise e
-        except pvrhino.RhinoActivationLimitError as e:
+        except pvporcupine.PorcupineActivationLimitError as e:
             print("AccessKey '%s' has reached it's temporary device limit" % self._access_key)
             raise e
-        except pvrhino.RhinoActivationRefusedError as e:
+        except pvporcupine.PorcupineActivationRefusedError as e:
             print("AccessKey '%s' refused" % self._access_key)
             raise e
-        except pvrhino.RhinoActivationThrottledError as e:
+        except pvporcupine.PorcupineActivationThrottledError as e:
             print("AccessKey '%s' has been throttled" % self._access_key)
             raise e
-        except pvrhino.RhinoError as e:
-            print("Failed to initialize Rhino")
+        except pvporcupine.PorcupineError as e:
+            print("Failed to initialize Porcupine")
             raise e
         except KeyboardInterrupt:
             print('Stopping ...')
-
         finally:
+            if porcupine is not None:
+                porcupine.delete()
+
             if recorder is not None:
                 recorder.delete()
-
-            if rhino is not None:
-                rhino.delete()
 
             if wav_file is not None:
                 wav_file.close()
@@ -153,49 +142,42 @@ class RhinoDemo(Thread):
         devices = PvRecorder.get_audio_devices()
 
         for i in range(len(devices)):
-            print("index: %d, device name: %s" % (i, devices[i]))
+            print('index: %d, device name: %s' % (i, devices[i]))
 
 
 def main():
     parser = argparse.ArgumentParser()
 
     parser.add_argument('--access_key',
-                        help='AccessKey obtained from Picovoice Console (https://console.picovoice.ai/)',
-                        required=True)
+                        help='AccessKey obtained from Picovoice Console (https://console.picovoice.ai/)')
 
-    parser.add_argument('--context_path', help="Absolute path to context file.", required=True)
+    parser.add_argument(
+        '--keywords',
+        nargs='+',
+        help='List of default keywords for detection. Available keywords: %s' % ', '.join(sorted(pvporcupine.KEYWORDS)),
+        choices=sorted(pvporcupine.KEYWORDS),
+        metavar='')
 
-    parser.add_argument('--library_path', help="Absolute path to dynamic library.", default=pvrhino.LIBRARY_PATH)
+    parser.add_argument(
+        '--keyword_paths',
+        nargs='+',
+        help="Absolute paths to keyword model files. If not set it will be populated from `--keywords` argument")
+
+    parser.add_argument('--library_path', help='Absolute path to dynamic library.', default=pvporcupine.LIBRARY_PATH)
 
     parser.add_argument(
         '--model_path',
-        help="Absolute path to the file containing model parameters.",
-        default=pvrhino.MODEL_PATH)
+        help='Absolute path to the file containing model parameters.',
+        default=pvporcupine.MODEL_PATH)
 
     parser.add_argument(
-        '--sensitivity',
-        help="Inference sensitivity. It should be a number within [0, 1]. A higher sensitivity value results in " +
-             "fewer misses at the cost of (potentially) increasing the erroneous inference rate.",
+        '--sensitivities',
+        nargs='+',
+        help="Sensitivities for detecting keywords. Each value should be a number within [0, 1]. A higher "
+             "sensitivity results in fewer misses at the cost of increasing the false alarm rate. If not set 0.5 "
+             "will be used.",
         type=float,
-        default=0.5)
-
-    parser.add_argument(
-        '--endpoint_duration_sec',
-        help="Endpoint duration in seconds. An endpoint is a chunk of silence at the end of an utterance that marks "
-             "the end of spoken command. It should be a positive number within [0.5, 5]. A lower endpoint duration "
-             "reduces delay and improves responsiveness. A higher endpoint duration assures Rhino doesn't return "
-             "inference preemptively in case the user pauses before finishing the request.",
-        type=float,
-        default=1.)
-
-    parser.add_argument(
-        '--require_endpoint',
-        help="If set to `True`, Rhino requires an endpoint (a chunk of silence) after the spoken command. If set to "
-             "`False`, Rhino tries to detect silence, but if it cannot, it still will provide inference regardless. "
-             "Set to `False` only if operating in an environment with overlapping speech (e.g. people talking in the "
-             "background).",
-        default='True',
-        choices=['True', 'False'])
+        default=None)
 
     parser.add_argument('--audio_device_index', help='Index of input audio device.', type=int, default=-1)
 
@@ -205,26 +187,33 @@ def main():
 
     args = parser.parse_args()
 
-    if args.require_endpoint.lower() == 'false':
-        require_endpoint = False
-    else:
-        require_endpoint = True
-
     if args.show_audio_devices:
-        RhinoDemo.show_audio_devices()
+        PorcupineDemo.show_audio_devices()
     else:
-        if not args.context_path:
-            raise ValueError('Missing path to context file')
+        if args.access_key is None:
+            raise ValueError("AccessKey (--access_key) is required")
+        if args.keyword_paths is None:
+            if args.keywords is None:
+                raise ValueError("Either `--keywords` or `--keyword_paths` must be set.")
 
-        RhinoDemo(
+            keyword_paths = [pvporcupine.KEYWORD_PATHS[x] for x in args.keywords]
+        else:
+            keyword_paths = args.keyword_paths
+
+        if args.sensitivities is None:
+            args.sensitivities = [0.5] * len(keyword_paths)
+
+        if len(keyword_paths) != len(args.sensitivities):
+            raise ValueError('Number of keywords does not match the number of sensitivities.')
+
+        PorcupineDemo(
             access_key=args.access_key,
             library_path=args.library_path,
             model_path=args.model_path,
-            context_path=args.context_path,
-            endpoint_duration_sec=args.endpoint_duration_sec,
-            require_endpoint=require_endpoint,
-            audio_device_index=args.audio_device_index,
-            output_path=args.output_path).run()
+            keyword_paths=keyword_paths,
+            sensitivities=args.sensitivities,
+            output_path=args.output_path,
+            input_device_index=args.audio_device_index).run()
 
 
 if __name__ == '__main__':
