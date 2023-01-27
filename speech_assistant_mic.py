@@ -9,13 +9,67 @@ from threading import Thread
 import pvporcupine
 from pvrecorder import PvRecorder
 
+import argparse
+from threading import Thread
+
+from pvcheetah import *
+from pvrecorder import PvRecorder
+
+
+class CheetahDemo(Thread):
+    def __init__(
+            self,
+            passed_recorder,
+            access_key: str,
+            model_path: Optional[str],
+            library_path: Optional[str],
+            endpoint_duration_sec: float,
+            enable_automatic_punctuation: bool):
+        super(CheetahDemo, self).__init__()
+
+        self._passed_recorder = passed_recorder
+        self._access_key = access_key
+        self._model_path = model_path
+        self._library_path = library_path
+        self._endpoint_duration_sec = endpoint_duration_sec
+        self._enable_automatic_punctuation = enable_automatic_punctuation
+        self._is_recording = False
+        self._stop = False
+
+    def run(self):
+        self._is_recording = True
+        recorder = self._passed_recorder
+        print('recorder is : %s' % recorder)
+
+        o = None
+
+        try:
+            o = create(
+                access_key=self._access_key,
+                library_path=self._library_path,
+                model_path=self._model_path,
+                endpoint_duration_sec=self._endpoint_duration_sec)
+            # recorder = PvRecorder(device_index=-1, frame_length=o.frame_length)
+            recorder.start()
+
+            print('Cheetah version : %s' % o.version)
+
+            while True:
+                partial_transcript, is_endpoint = o.process(recorder.read())
+                print(partial_transcript, end='', flush=True)
+                if is_endpoint:
+                    print(o.flush())
+        except KeyboardInterrupt:
+            pass
+        finally:
+            if recorder is None:
+                recorder.stop()
+
+            if o is not None:
+                o.delete()
+
 
 class PorcupineDemo(Thread):
-    """
-    Microphone Demo for Porcupine wake word engine. It creates an input audio stream from a microphone, monitors it, and
-    upon detecting the specified wake word(s) prints the detection time and wake word on console. It optionally saves
-    the recorded audio into a file for further debugging.
-    """
 
     def __init__(
             self,
@@ -24,21 +78,10 @@ class PorcupineDemo(Thread):
             model_path,
             keyword_paths,
             sensitivities,
+            endpoint_duration_sec,
+            enable_automatic_punctuation,
             input_device_index=None,
             output_path=None):
-
-        """
-        Constructor.
-        :param library_path: Absolute path to Porcupine's dynamic library.
-        :param model_path: Absolute path to the file containing model parameters.
-        :param keyword_paths: Absolute paths to keyword model files.
-        :param sensitivities: Sensitivities for detecting keywords. Each value should be a number within [0, 1]. A
-        higher sensitivity results in fewer misses at the cost of increasing the false alarm rate. If not set 0.5 will
-        be used.
-        :param input_device_index: Optional argument. If provided, audio is recorded from this input device. Otherwise,
-        the default audio input device is used.
-        :param output_path: If provided recorded audio will be stored in this location at the end of the run.
-        """
 
         super(PorcupineDemo, self).__init__()
 
@@ -48,14 +91,11 @@ class PorcupineDemo(Thread):
         self._keyword_paths = keyword_paths
         self._sensitivities = sensitivities
         self._input_device_index = input_device_index
-
+        self._endpoint_duration_sec = endpoint_duration_sec
+        self._enable_automatic_punctuation = enable_automatic_punctuation
         self._output_path = output_path
 
     def run(self):
-        """
-         Creates an input audio stream, instantiates an instance of Porcupine object, and monitors the audio stream for
-         occurrences of the wake word(s). It prints the time of detection for each occurrence and the wake word.
-         """
 
         keywords = list()
         for x in self._keyword_paths:
@@ -98,7 +138,17 @@ class PorcupineDemo(Thread):
 
                 result = porcupine.process(pcm)
                 if result >= 0:
+                    # Right here i need to give the logic to turn speech into text
                     print('[%s] Detected %s' % (str(datetime.now()), keywords[result]))
+                    recorder.stop()
+                    demo = CheetahDemo(access_key=self._access_key,
+                                passed_recorder=recorder,
+                                model_path=None,
+                                library_path=None,
+                                endpoint_duration_sec=0.5,
+                                enable_automatic_punctuation=True)
+                    demo.run()
+
         except pvporcupine.PorcupineInvalidArgumentError as e:
             args = (
                 self._access_key,
@@ -185,6 +235,10 @@ def main():
 
     parser.add_argument('--show_audio_devices', action='store_true')
 
+    parser.add_argument('--endpoint_duration_sec', type=float, default=1.)
+
+    parser.add_argument('--disable_automatic_punctuation', action='store_true')
+
     args = parser.parse_args()
 
     if args.show_audio_devices:
@@ -213,7 +267,9 @@ def main():
             keyword_paths=keyword_paths,
             sensitivities=args.sensitivities,
             output_path=args.output_path,
-            input_device_index=args.audio_device_index).run()
+            input_device_index=args.audio_device_index,
+            endpoint_duration_sec=args.endpoint_duration_sec,
+            enable_automatic_punctuation=not args.disable_automatic_punctuation).run()
 
 
 if __name__ == '__main__':
