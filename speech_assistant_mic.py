@@ -3,6 +3,7 @@ import argparse
 import os
 import struct
 import wave
+import time
 from datetime import datetime
 from threading import Thread
 
@@ -14,6 +15,7 @@ from threading import Thread
 
 from pvcheetah import *
 from pvrecorder import PvRecorder
+
 
 
 class CheetahDemo(Thread):
@@ -48,7 +50,7 @@ class CheetahDemo(Thread):
                 access_key=self._access_key,
                 library_path=self._library_path,
                 model_path=self._model_path,
-                endpoint_duration_sec=self._endpoint_duration_sec)
+                endpoint_duration_sec=5)
             # recorder = PvRecorder(device_index=-1, frame_length=o.frame_length)
             recorder.start()
 
@@ -59,6 +61,8 @@ class CheetahDemo(Thread):
                 print(partial_transcript, end='', flush=True)
                 if is_endpoint:
                     print(o.flush())
+                    break
+                    
         except KeyboardInterrupt:
             pass
         finally:
