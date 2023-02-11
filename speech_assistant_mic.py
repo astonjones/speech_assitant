@@ -3,7 +3,7 @@ import argparse
 import os
 import struct
 import wave
-import time
+import openai
 from datetime import datetime
 from threading import Thread
 
@@ -14,7 +14,22 @@ import argparse
 from threading import Thread
 
 from pvcheetah import *
-from pvrecorder import PvRecorder
+
+class CallToChatGPT(Thread):
+        def __init__(
+                self,
+                passed_prompt):
+            super(CallToChatGPT, self).__init__()
+            self._passed_prompt = passed_prompt
+
+
+        def run(self):
+            try:
+                print("prompt = %s " % self._passed_prompt)
+                response = openai.Completion.create(engine="text-davinci-002", prompt=self._passed_prompt)
+                print(response["choices"][0]["text"])
+            finally:
+                print("end of call to chatgpt")
 
 
 
@@ -41,7 +56,6 @@ class CheetahDemo(Thread):
     def run(self):
         self._is_recording = True
         recorder = self._passed_recorder
-        print('recorder is : %s' % recorder)
 
         o = None
 
@@ -51,7 +65,6 @@ class CheetahDemo(Thread):
                 library_path=self._library_path,
                 model_path=self._model_path,
                 endpoint_duration_sec=5)
-            # recorder = PvRecorder(device_index=-1, frame_length=o.frame_length)
             recorder.start()
 
             print('Cheetah version : %s' % o.version)
@@ -60,14 +73,15 @@ class CheetahDemo(Thread):
                 partial_transcript, is_endpoint = o.process(recorder.read())
                 print(partial_transcript, end='', flush=True)
                 if is_endpoint:
-                    print(o.flush())
+                    recorder.stop()
+                    gpt_call = CallToChatGPT(passed_prompt=o.flush())
+                    gpt_call.run()
                     break
                     
         except KeyboardInterrupt:
             pass
         finally:
-            if recorder is None:
-                recorder.stop()
+            recorder.stop()
 
             if o is not None:
                 o.delete()
@@ -100,7 +114,7 @@ class PorcupineDemo(Thread):
         self._output_path = output_path
 
     def run(self):
-
+        openai.api_key = os.getenv("OPENAI_ACCESS_KEY")
         keywords = list()
         for x in self._keyword_paths:
             keyword_phrase_part = os.path.basename(x).replace('.ppn', '').split('_')
@@ -121,7 +135,6 @@ class PorcupineDemo(Thread):
                 sensitivities=self._sensitivities)
 
             recorder = PvRecorder(device_index=self._input_device_index, frame_length=porcupine.frame_length)
-            recorder.start()
 
             if self._output_path is not None:
                 wav_file = wave.open(self._output_path, "w")
@@ -135,6 +148,7 @@ class PorcupineDemo(Thread):
             print('}')
 
             while True:
+                recorder.start()
                 pcm = recorder.read()
 
                 if wav_file is not None:
@@ -142,9 +156,9 @@ class PorcupineDemo(Thread):
 
                 result = porcupine.process(pcm)
                 if result >= 0:
+                    recorder.stop()
                     # Right here i need to give the logic to turn speech into text
                     print('[%s] Detected %s' % (str(datetime.now()), keywords[result]))
-                    recorder.stop()
                     demo = CheetahDemo(access_key=self._access_key,
                                 passed_recorder=recorder,
                                 model_path=None,
