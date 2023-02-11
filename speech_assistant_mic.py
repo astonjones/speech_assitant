@@ -2,6 +2,7 @@
 import argparse
 import os
 import struct
+from typing import Optional
 import wave
 import openai
 from datetime import datetime
@@ -13,7 +14,7 @@ from pvrecorder import PvRecorder
 import argparse
 from threading import Thread
 
-from pvcheetah import *
+import pvcheetah
 
 class CallToChatGPT(Thread):
         def __init__(
@@ -26,7 +27,7 @@ class CallToChatGPT(Thread):
         def run(self):
             try:
                 print("prompt = %s " % self._passed_prompt)
-                response = openai.Completion.create(engine="text-davinci-002", prompt=self._passed_prompt)
+                response = openai.Completion.create(engine="text-curie-001", prompt=self._passed_prompt)
                 print(response["choices"][0]["text"])
             finally:
                 print("end of call to chatgpt")
@@ -57,25 +58,29 @@ class CheetahDemo(Thread):
         self._is_recording = True
         recorder = self._passed_recorder
 
-        o = None
+        cheetah = None
+        fullTranscript = ''
 
         try:
-            o = create(
+            cheetah = pvcheetah.create(
                 access_key=self._access_key,
                 library_path=self._library_path,
                 model_path=self._model_path,
                 endpoint_duration_sec=5)
             recorder.start()
 
-            print('Cheetah version : %s' % o.version)
+            print('Cheetah version : %s' % cheetah.version)
 
             while True:
-                partial_transcript, is_endpoint = o.process(recorder.read())
-                print(partial_transcript, end='', flush=True)
+                fullTranscript += cheetah.process(recorder.read())[0]
+                is_endpoint = cheetah.process(recorder.read())[1]
                 if is_endpoint:
                     recorder.stop()
-                    gpt_call = CallToChatGPT(passed_prompt=o.flush())
+                    fullTranscript += cheetah.flush()
+                    print('fullest transcript %s ' % fullTranscript)
+                    gpt_call = CallToChatGPT(fullTranscript)
                     gpt_call.run()
+                    print('end of cheetah loop')
                     break
                     
         except KeyboardInterrupt:
@@ -83,8 +88,8 @@ class CheetahDemo(Thread):
         finally:
             recorder.stop()
 
-            if o is not None:
-                o.delete()
+            if cheetah is not None:
+                cheetah.delete()
 
 
 class PorcupineDemo(Thread):
@@ -116,6 +121,7 @@ class PorcupineDemo(Thread):
     def run(self):
         openai.api_key = os.getenv("OPENAI_ACCESS_KEY")
         keywords = list()
+        # GO through this for loop and see if it neccessary
         for x in self._keyword_paths:
             keyword_phrase_part = os.path.basename(x).replace('.ppn', '').split('_')
             if len(keyword_phrase_part) > 6:

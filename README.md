@@ -9,3 +9,18 @@
 4.) Once text is recieved from CHATPGT API use google text to speech
 
 5.) Profit?!
+
+## Setup
+
+Set environment variable on host machine:
+
+OPENAI_ACCESS_KEY=<insert_access_key>
+
+install necessary imports through pip
+
+run command:
+
+python speech_assistant_mic.py --access_key <insert_pv_access_key> --keywords <wake_word>
+
+say jarvis to access chat prompt
+
