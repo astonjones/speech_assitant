@@ -15,22 +15,71 @@ import argparse
 from threading import Thread
 
 import pvcheetah
+from google.cloud import texttospeech
+from playsound import playsound
+
+class TextToSpeech(Thread):
+    def __init__(
+            self,
+            passed_text):
+        super(TextToSpeech, self).__init__()
+        self.__passed_text = passed_text
+
+    def run(self):
+        try:
+            print("call to google text to speach initiated")
+            # Instantiates a client
+            client = texttospeech.TextToSpeechClient()
+
+            # Set the text input to be synthesized
+            synthesis_input = texttospeech.SynthesisInput(text="Popcorn in my mouth!")
+
+            # Build the voice request, select the language code ("en-US") and the ssml
+            # voice gender ("neutral")
+            voice = texttospeech.VoiceSelectionParams(
+                language_code="en-US", ssml_gender=texttospeech.SsmlVoiceGender.NEUTRAL
+            )
+
+            # CHANGE THIS TO NOT ACCEPT A FILE BUT A STRING??
+            # Select the type of audio file you want returned
+            audio_config = texttospeech.AudioConfig(
+                audio_encoding=texttospeech.AudioEncoding.MP3
+            )
+
+            # Perform the text-to-speech request on the text input with the selected
+            # voice parameters and audio file type
+            response = client.synthesize_speech(
+                input=synthesis_input, voice=voice, audio_config=audio_config
+            )
+
+            mp3FilePath = "outputFile.mp3"
+
+            # The response's audio_content is binary.
+            with open(mp3FilePath, "wb") as out:
+                # Write the response to the output file.
+                out.write(response.audio_content)
+            print('Audio content written to file "output.mp3"')
+        finally:
+            print("Call to t2s ended")
+            playsound(mp3FilePath)
+
+
 
 class CallToChatGPT(Thread):
-        def __init__(
-                self,
-                passed_prompt):
-            super(CallToChatGPT, self).__init__()
-            self._passed_prompt = passed_prompt
+    def __init__(
+            self,
+            passed_prompt):
+        super(CallToChatGPT, self).__init__()
+        self._passed_prompt = passed_prompt
 
 
-        def run(self):
-            try:
-                print("prompt = %s " % self._passed_prompt)
-                response = openai.Completion.create(engine="text-curie-001", prompt=self._passed_prompt)
-                print(response["choices"][0]["text"])
-            finally:
-                print("end of call to chatgpt")
+    def run(self):
+        try:
+            print("prompt = %s " % self._passed_prompt)
+            response = openai.Completion.create(engine="text-curie-001", prompt=self._passed_prompt)
+            print(response["choices"][0]["text"])
+        finally:
+            print("end of call to chatgpt")
 
 
 
@@ -80,7 +129,6 @@ class CheetahDemo(Thread):
                     print('fullest transcript %s ' % fullTranscript)
                     gpt_call = CallToChatGPT(fullTranscript)
                     gpt_call.run()
-                    print('end of cheetah loop')
                     break
                     
         except KeyboardInterrupt:
@@ -284,16 +332,18 @@ def main():
         if len(keyword_paths) != len(args.sensitivities):
             raise ValueError('Number of keywords does not match the number of sensitivities.')
 
-        PorcupineDemo(
-            access_key=args.access_key,
-            library_path=args.library_path,
-            model_path=args.model_path,
-            keyword_paths=keyword_paths,
-            sensitivities=args.sensitivities,
-            output_path=args.output_path,
-            input_device_index=args.audio_device_index,
-            endpoint_duration_sec=args.endpoint_duration_sec,
-            enable_automatic_punctuation=not args.disable_automatic_punctuation).run()
+        # PorcupineDemo(
+        #     access_key=args.access_key,
+        #     library_path=args.library_path,
+        #     model_path=args.model_path,
+        #     keyword_paths=keyword_paths,
+        #     sensitivities=args.sensitivities,
+        #     output_path=args.output_path,
+        #     input_device_index=args.audio_device_index,
+        #     endpoint_duration_sec=args.endpoint_duration_sec,
+        #     enable_automatic_punctuation=not args.disable_automatic_punctuation).run()
+
+        TextToSpeech(passed_text='Text to be said').run()
 
 
 if __name__ == '__main__':
