@@ -18,6 +18,12 @@ OPENAI_ACCESS_KEY=<insert_access_key>
 
 install necessary imports through pip
 
+Install google client tools
+
+Setup a project in google and run "gcloud auth login" to sign in
+
+Create a service account for google text to speech
+
 run command:
 
 python speech_assistant_mic.py --access_key <insert_pv_access_key> --keywords <wake_word>

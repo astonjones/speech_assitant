@@ -18,6 +18,9 @@ import pvcheetah
 from google.cloud import texttospeech
 from playsound import playsound
 
+from pydub import AudioSegment
+from pydub.playback import play
+
 class TextToSpeech(Thread):
     def __init__(
             self,
@@ -27,12 +30,12 @@ class TextToSpeech(Thread):
 
     def run(self):
         try:
-            print("call to google text to speach initiated")
+            print("call to google text to speech initiated")
             # Instantiates a client
             client = texttospeech.TextToSpeechClient()
 
             # Set the text input to be synthesized
-            synthesis_input = texttospeech.SynthesisInput(text="Popcorn in my mouth!")
+            synthesis_input = texttospeech.SynthesisInput(text=self.__passed_text)
 
             # Build the voice request, select the language code ("en-US") and the ssml
             # voice gender ("neutral")
@@ -61,7 +64,8 @@ class TextToSpeech(Thread):
             print('Audio content written to file "output.mp3"')
         finally:
             print("Call to t2s ended")
-            playsound(mp3FilePath)
+            audio = AudioSegment.from_file(mp3FilePath, "mp3")
+            play(audio)
 
 
 
@@ -77,7 +81,9 @@ class CallToChatGPT(Thread):
         try:
             print("prompt = %s " % self._passed_prompt)
             response = openai.Completion.create(engine="text-curie-001", prompt=self._passed_prompt)
-            print(response["choices"][0]["text"])
+            chatReply = response["choices"][0]["text"]
+            print('Chat reply %s ' % chatReply)
+            TextToSpeech(chatReply).run()
         finally:
             print("end of call to chatgpt")
 
@@ -332,19 +338,16 @@ def main():
         if len(keyword_paths) != len(args.sensitivities):
             raise ValueError('Number of keywords does not match the number of sensitivities.')
 
-        # PorcupineDemo(
-        #     access_key=args.access_key,
-        #     library_path=args.library_path,
-        #     model_path=args.model_path,
-        #     keyword_paths=keyword_paths,
-        #     sensitivities=args.sensitivities,
-        #     output_path=args.output_path,
-        #     input_device_index=args.audio_device_index,
-        #     endpoint_duration_sec=args.endpoint_duration_sec,
-        #     enable_automatic_punctuation=not args.disable_automatic_punctuation).run()
-
-        TextToSpeech(passed_text='Text to be said').run()
-
+        PorcupineDemo(
+            access_key=args.access_key,
+            library_path=args.library_path,
+            model_path=args.model_path,
+            keyword_paths=keyword_paths,
+            sensitivities=args.sensitivities,
+            output_path=args.output_path,
+            input_device_index=args.audio_device_index,
+            endpoint_duration_sec=args.endpoint_duration_sec,
+            enable_automatic_punctuation=not args.disable_automatic_punctuation).run()
 
 if __name__ == '__main__':
     main()
