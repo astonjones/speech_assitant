@@ -2,6 +2,7 @@
 import argparse
 import os
 import struct
+from typing import Optional
 import wave
 import openai
 from datetime import datetime
@@ -13,23 +14,78 @@ from pvrecorder import PvRecorder
 import argparse
 from threading import Thread
 
-from pvcheetah import *
+import pvcheetah
+from google.cloud import texttospeech
+from playsound import playsound
+
+from pydub import AudioSegment
+from pydub.playback import play
+
+class TextToSpeech(Thread):
+    def __init__(
+            self,
+            passed_text):
+        super(TextToSpeech, self).__init__()
+        self.__passed_text = passed_text
+
+    def run(self):
+        try:
+            print("call to google text to speech initiated")
+            # Instantiates a client
+            client = texttospeech.TextToSpeechClient()
+
+            # Set the text input to be synthesized
+            synthesis_input = texttospeech.SynthesisInput(text=self.__passed_text)
+
+            # Build the voice request, select the language code ("en-US") and the ssml
+            # voice gender ("neutral")
+            voice = texttospeech.VoiceSelectionParams(
+                language_code="en-US", ssml_gender=texttospeech.SsmlVoiceGender.NEUTRAL
+            )
+
+            # CHANGE THIS TO NOT ACCEPT A FILE BUT A STRING??
+            # Select the type of audio file you want returned
+            audio_config = texttospeech.AudioConfig(
+                audio_encoding=texttospeech.AudioEncoding.MP3
+            )
+
+            # Perform the text-to-speech request on the text input with the selected
+            # voice parameters and audio file type
+            response = client.synthesize_speech(
+                input=synthesis_input, voice=voice, audio_config=audio_config
+            )
+
+            mp3FilePath = "outputFile.mp3"
+
+            # The response's audio_content is binary.
+            with open(mp3FilePath, "wb") as out:
+                # Write the response to the output file.
+                out.write(response.audio_content)
+            print('Audio content written to file "output.mp3"')
+        finally:
+            print("Call to t2s ended")
+            audio = AudioSegment.from_file(mp3FilePath, "mp3")
+            play(audio)
+
+
 
 class CallToChatGPT(Thread):
-        def __init__(
-                self,
-                passed_prompt):
-            super(CallToChatGPT, self).__init__()
-            self._passed_prompt = passed_prompt
+    def __init__(
+            self,
+            passed_prompt):
+        super(CallToChatGPT, self).__init__()
+        self._passed_prompt = passed_prompt
 
 
-        def run(self):
-            try:
-                print("prompt = %s " % self._passed_prompt)
-                response = openai.Completion.create(engine="text-davinci-002", prompt=self._passed_prompt)
-                print(response["choices"][0]["text"])
-            finally:
-                print("end of call to chatgpt")
+    def run(self):
+        try:
+            print("prompt = %s " % self._passed_prompt)
+            response = openai.Completion.create(engine="text-curie-001", prompt=self._passed_prompt)
+            chatReply = response["choices"][0]["text"]
+            print('Chat reply %s ' % chatReply)
+            TextToSpeech(chatReply).run()
+        finally:
+            print("end of call to chatgpt")
 
 
 
@@ -57,24 +113,27 @@ class CheetahDemo(Thread):
         self._is_recording = True
         recorder = self._passed_recorder
 
-        o = None
+        cheetah = None
+        fullTranscript = ''
 
         try:
-            o = create(
+            cheetah = pvcheetah.create(
                 access_key=self._access_key,
                 library_path=self._library_path,
                 model_path=self._model_path,
                 endpoint_duration_sec=5)
             recorder.start()
 
-            print('Cheetah version : %s' % o.version)
+            print('Cheetah version : %s' % cheetah.version)
 
             while True:
-                partial_transcript, is_endpoint = o.process(recorder.read())
-                print(partial_transcript, end='', flush=True)
+                fullTranscript += cheetah.process(recorder.read())[0]
+                is_endpoint = cheetah.process(recorder.read())[1]
                 if is_endpoint:
                     recorder.stop()
-                    gpt_call = CallToChatGPT(passed_prompt=o.flush())
+                    fullTranscript += cheetah.flush()
+                    print('fullest transcript %s ' % fullTranscript)
+                    gpt_call = CallToChatGPT(fullTranscript)
                     gpt_call.run()
                     break
                     
@@ -83,8 +142,8 @@ class CheetahDemo(Thread):
         finally:
             recorder.stop()
 
-            if o is not None:
-                o.delete()
+            if cheetah is not None:
+                cheetah.delete()
 
 
 class PorcupineDemo(Thread):
@@ -116,6 +175,7 @@ class PorcupineDemo(Thread):
     def run(self):
         openai.api_key = os.getenv("OPENAI_ACCESS_KEY")
         keywords = list()
+        # GO through this for loop and see if it neccessary
         for x in self._keyword_paths:
             keyword_phrase_part = os.path.basename(x).replace('.ppn', '').split('_')
             if len(keyword_phrase_part) > 6:
@@ -288,7 +348,6 @@ def main():
             input_device_index=args.audio_device_index,
             endpoint_duration_sec=args.endpoint_duration_sec,
             enable_automatic_punctuation=not args.disable_automatic_punctuation).run()
-
 
 if __name__ == '__main__':
     main()
